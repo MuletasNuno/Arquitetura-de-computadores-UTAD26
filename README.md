@@ -21,11 +21,8 @@ Quilómetros
 Ano
 Cor
 Preço
-🛠️ Tecnologias Utilizadas
-Assembly 8086
-MASM / EMU8086
-Ambiente DOS
-Programação low-level
+
+
 📂 Estrutura do Programa
 
 O programa encontra-se dividido em:
@@ -37,13 +34,3 @@ Gestão de motas
 Entrada de dados
 Edição de veículos
 Impressão de informação no ecrã
-
-Cada veículo contém os seguintes campos:
-
-Campo	Tamanho
-Marca	20 caracteres
-Modelo	20 caracteres
-KMs	20 caracteres
-Ano	20 caracteres
-Cor	20 caracteres
-Preço	8 caracteres
