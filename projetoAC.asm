@@ -2,7 +2,7 @@
 ;  GESTAO DE VEICULOS - MASM / EMU8086 (16-bit, DOS)
 ;  Menu: Utilizador / Admin (com password)
 ;  Veiculos: Carros e Motas
-;  Campos: Marca, Modelo, KMs, Ano, Cor, Preco
+;  Campos: Marca, Modelo, KMs, Ano, Cor, Preco, Cilindrada
 ; ============================================================
 
 .MODEL SMALL
@@ -11,19 +11,40 @@
 ; ============================================================
 ; CONSTANTES
 ; ============================================================
-CAMPO_TAM   EQU 20      ; tamanho maximo de cada campo de texto
-PRECO_TAM   EQU 8       ; tamanho maximo do preco
-VEICULO_TAM EQU 108     ; 5*CAMPO_TAM + PRECO_TAM = 108
-MAX_VEI     EQU 5       ; maximo de veiculos por tipo
+CAMPO_TAM    EQU 20      ; tamanho de cada campo de texto
+PRECO_TAM    EQU 8       ; tamanho do campo preco
+CIL_TAM      EQU 8       ; tamanho do campo cilindrada (ex: "1600cc")
+;
+; Layout por veiculo (em bytes):
+;   marca(20) + modelo(20) + kms(20) + ano(20) + cor(20) + preco(8) + cil(8)
+;   = 116 bytes
+VEICULO_TAM  EQU 116
+MAX_VEI      EQU 5       ; maximo de veiculos por tipo
+
+; Offsets dentro de um veiculo
+OFF_MARCA    EQU 0
+OFF_MODELO   EQU 20
+OFF_KMS      EQU 40
+OFF_ANO      EQU 60
+OFF_COR      EQU 80
+OFF_PRECO    EQU 100
+OFF_CIL      EQU 108
+
+; Tamanho total do bloco de dados gravado em ficheiro:
+;   2 bytes contadores + dados carros + dados motas
+DADOS_CAB    EQU 2                          ; num_carros + num_motas
+DADOS_CARR   EQU MAX_VEI * VEICULO_TAM      ; 580
+DADOS_MOTA   EQU MAX_VEI * VEICULO_TAM      ; 580
+DADOS_TOT    EQU DADOS_CAB + DADOS_CARR + DADOS_MOTA  ; 1162
 
 ; ============================================================
 .DATA
 ; ============================================================
 
 ; --- Mensagens gerais ---
-msg_sep     DB "====================================", 13, 10, "$"
-msg_titulo  DB "   GESTAO DE VEICULOS", 13, 10, "$"
-msg_nl      DB 13, 10, "$"
+msg_sep      DB "====================================", 13, 10, "$"
+msg_titulo   DB "   GESTAO DE VEICULOS", 13, 10, "$"
+msg_nl       DB 13, 10, "$"
 
 ; --- Menu principal ---
 msg_menu_prin DB 13,10
@@ -33,13 +54,12 @@ msg_menu_prin DB 13,10
               DB "  Opcao: $"
 
 ; --- Login admin ---
-msg_pass    DB 13,10,"  Password admin: $"
-msg_erro_p  DB 13,10,"  [ERRO] Password incorrecta!", 13,10,"$"
-msg_acesso  DB 13,10,"  [OK] Acesso concedido!", 13,10,"$"
+msg_pass     DB 13,10,"  Password admin: $"
+msg_erro_p   DB 13,10,"  [ERRO] Password incorrecta!", 13,10,"$"
+msg_acesso   DB 13,10,"  [OK] Acesso concedido!", 13,10,"$"
 
-; A password do admin (definida aqui)
-password    DB "admin123", 0
-PASS_LEN    EQU 8
+password     DB "123456", 0
+PASS_LEN     EQU 6
 
 ; --- Menus ---
 msg_menu_user DB 13,10
@@ -61,26 +81,29 @@ msg_menu_adm  DB 13,10
               DB "  Opcao: $"
 
 ; --- Labels de exibicao ---
-lbl_marca   DB 13,10,"  Marca  : $"
-lbl_modelo  DB "  Modelo : $"
-lbl_kms     DB "  KMs    : $"
-lbl_ano     DB "  Ano    : $"
-lbl_cor     DB "  Cor    : $"
-lbl_preco   DB "  Preco  : $"
-lbl_eur     DB " EUR",13,10,"$"
-lbl_vnum    DB 13,10,"  --- Veiculo #$"
-lbl_dash    DB " ---",13,10,"$"
+lbl_marca    DB 13,10,"  Marca       : $"
+lbl_modelo   DB "  Modelo      : $"
+lbl_kms      DB "  KMs         : $"
+lbl_ano      DB "  Ano         : $"
+lbl_cor      DB "  Cor         : $"
+lbl_preco    DB "  Preco       : $"
+lbl_cil      DB "  Cilindrada  : $"
+lbl_eur      DB " EUR",13,10,"$"
+lbl_cc       DB " cc",13,10,"$"
+lbl_vnum     DB 13,10,"  --- Veiculo #$"
+lbl_dash     DB " ---",13,10,"$"
 
 ; --- Prompts de input ---
-prm_marca   DB 13,10,"  Insira Marca  : $"
-prm_modelo  DB "  Insira Modelo : $"
-prm_kms     DB "  Insira KMs    : $"
-prm_ano     DB "  Insira Ano    : $"
-prm_cor     DB "  Insira Cor    : $"
-prm_preco   DB "  Insira Preco  : $"
-prm_idx     DB 13,10,"  Numero (1-5)  : $"
+prm_marca    DB 13,10,"  Insira Marca      : $"
+prm_modelo   DB "  Insira Modelo     : $"
+prm_kms      DB "  Insira KMs        : $"
+prm_ano      DB "  Insira Ano        : $"
+prm_cor      DB "  Insira Cor        : $"
+prm_preco    DB "  Insira Preco      : $"
+prm_cil      DB "  Insira Cilindrada : $"
+prm_idx      DB 13,10,"  Numero (1-5)      : $"
 
-; --- Submenu de edicao de campo ---
+; --- Submenu de edicao ---
 msg_menu_edit DB 13,10
               DB "  O que deseja editar?",13,10
               DB "  [1] Marca",13,10
@@ -89,94 +112,104 @@ msg_menu_edit DB 13,10
               DB "  [4] Ano",13,10
               DB "  [5] Cor",13,10
               DB "  [6] Preco",13,10
+              DB "  [7] Cilindrada",13,10
               DB "  [0] Terminar edicao",13,10
               DB "  Opcao: $"
 
 msg_edit_atual DB 13,10,"  Valor actual: $"
 
 ; --- Cabecalhos ---
-hdr_carros  DB 13,10,"  === LISTA DE CARROS ===",13,10,"$"
-hdr_motas   DB 13,10,"  === LISTA DE MOTAS  ===",13,10,"$"
+hdr_carros   DB 13,10,"  === LISTA DE CARROS ===",13,10,"$"
+hdr_motas    DB 13,10,"  === LISTA DE MOTAS  ===",13,10,"$"
 
 ; --- Mensagens de estado ---
-msg_vazio   DB "  (Nenhum veiculo registado)",13,10,"$"
-msg_ok_add  DB 13,10,"  [OK] Veiculo adicionado!",13,10,"$"
-msg_ok_ed   DB 13,10,"  [OK] Veiculo editado!",13,10,"$"
-msg_cheio   DB 13,10,"  [ERRO] Lista cheia!",13,10,"$"
-msg_inv_op  DB 13,10,"  Opcao invalida.",13,10,"$"
-msg_inv_idx DB 13,10,"  Numero invalido.",13,10,"$"
-msg_adeus   DB 13,10,"  Ate logo!",13,10,"$"
+msg_vazio    DB "  (Nenhum veiculo registado)",13,10,"$"
+msg_ok_add   DB 13,10,"  [OK] Veiculo adicionado!",13,10,"$"
+msg_ok_ed    DB 13,10,"  [OK] Campo editado!",13,10,"$"
+msg_cheio    DB 13,10,"  [ERRO] Lista cheia!",13,10,"$"
+msg_inv_op   DB 13,10,"  Opcao invalida.",13,10,"$"
+msg_inv_idx  DB 13,10,"  Numero invalido.",13,10,"$"
+msg_adeus    DB 13,10,"  Ate logo!",13,10,"$"
+
+; --- Mensagens de ficheiro ---
+msg_dat_ok   DB 13,10,"  [OK] Dados gravados em VEICULOS.DAT",13,10,"$"
+msg_dat_load DB 13,10,"  [OK] Dados carregados de VEICULOS.DAT",13,10,"$"
+msg_dat_novo DB 13,10,"  [INFO] VEICULOS.DAT nao encontrado. A usar dados de exemplo.",13,10,"$"
+msg_dat_err  DB 13,10,"  [AVISO] Erro ao gravar VEICULOS.DAT.",13,10,"$"
+
+; Nome do ficheiro de dados
+fname        DB "VEICULOS.DAT", 0
+
+; Handle do ficheiro (word)
+fhandle      DW 0
 
 ; ============================================================
-; ARRAYS DE VEICULOS
-; Cada veiculo: marca(20) modelo(20) kms(20) ano(20) cor(20) preco(8)
+; DADOS DE EXEMPLO (pre-carregados se .DAT nao existir)
 ; ============================================================
 
-; --- Carros pre-carregados ---
-; Carro 1
-c1_marca  DB "Toyota", 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+; Carro 1 - Toyota Corolla
+c1_marca  DB "Toyota",  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 c1_modelo DB "Corolla", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c1_kms    DB "45000", 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c1_ano    DB "2020", 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c1_cor    DB "Branco", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c1_preco  DB "18500", 0,  0, 0
+c1_kms    DB "45000",   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+c1_ano    DB "2020",    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+c1_cor    DB "Branco",  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+c1_preco  DB "18500",   0, 0, 0
+c1_cil    DB "1800",    0, 0, 0, 0
 
-; Carro 2
-c2_marca  DB "BMW", 0,      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c2_modelo DB "Serie 3", 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c2_kms    DB "80000", 0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c2_ano    DB "2018", 0,     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c2_cor    DB "Preto", 0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-c2_preco  DB "24000", 0,    0, 0
+; Carro 2 - BMW Serie 3
+c2_marca  DB "BMW",     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+c2_modelo DB "Serie 3", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+c2_kms    DB "80000",   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+c2_ano    DB "2018",    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+c2_cor    DB "Preto",   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+c2_preco  DB "24000",   0, 0, 0
+c2_cil    DB "2000",    0, 0, 0, 0
 
-; Motas pre-carregadas
-; Mota 1
-m1_marca  DB "Honda", 0,     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m1_modelo DB "CB500F", 0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m1_kms    DB "12000", 0,     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m1_ano    DB "2021", 0,      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m1_cor    DB "Vermelho", 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m1_preco  DB "6800", 0,      0, 0, 0, 0
+; Mota 1 - Honda CB500F
+m1_marca  DB "Honda",   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m1_modelo DB "CB500F",  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m1_kms    DB "12000",   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m1_ano    DB "2021",    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m1_cor    DB "Vermelho",0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m1_preco  DB "6800",    0, 0, 0, 0
+m1_cil    DB "471",     0, 0, 0, 0, 0
 
-; Mota 2
-m2_marca  DB "Yamaha", 0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m2_modelo DB "MT-07", 0,     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m2_kms    DB "30000", 0,     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m2_ano    DB "2019", 0,      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m2_cor    DB "Azul", 0,      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-m2_preco  DB "8200", 0,      0, 0, 0, 0
+; Mota 2 - Yamaha MT-07
+m2_marca  DB "Yamaha",  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m2_modelo DB "MT-07",   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m2_kms    DB "30000",   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m2_ano    DB "2019",    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m2_cor    DB "Azul",    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+m2_preco  DB "8200",    0, 0, 0, 0
+m2_cil    DB "689",     0, 0, 0, 0, 0
 
-; --- Arrays dinamicos (MAX_VEI * VEICULO_TAM cada) ---
-; Organizados como blocos de 108 bytes por veiculo
-arr_carros  DB MAX_VEI * VEICULO_TAM DUP(0)
-arr_motas   DB MAX_VEI * VEICULO_TAM DUP(0)
+; ============================================================
+; ARRAYS DE VEICULOS  (MAX_VEI * VEICULO_TAM = 5 * 116 = 580)
+; ============================================================
+arr_carros   DB MAX_VEI * VEICULO_TAM DUP(0)
+arr_motas    DB MAX_VEI * VEICULO_TAM DUP(0)
 
-; Contadores
-num_carros  DB 0
-num_motas   DB 0
+num_carros   DB 0
+num_motas    DB 0
 
-; Buffer de input generico
-inp_buf     DB 25 DUP(0)
-pass_buf    DB 12 DUP(0)
-
-; Variavel temporaria para indice
-idx_tmp     DB 0
-vei_base    DW 0
+; Buffers auxiliares
+pass_buf     DB 12 DUP(0)
+idx_tmp      DB 0
+vei_base     DW 0
 
 ; ============================================================
 .CODE
 ; ============================================================
 
 MAIN PROC
-    ; Inicializar segmentos
     MOV AX, @DATA
     MOV DS, AX
     MOV ES, AX
 
-    ; Inicializar arrays com dados de exemplo
-    CALL INIT_DADOS
+    ; Tentar carregar dados do ficheiro; se falhar, usar exemplos
+    CALL CARREGAR_DADOS
 
-    ; Mostrar titulo
+    ; Titulo
     LEA DX, msg_sep
     MOV AH, 09h
     INT 21h
@@ -192,14 +225,11 @@ LOOP_PRINCIPAL:
     MOV AH, 09h
     INT 21h
 
-    ; Ler opcao
     MOV AH, 01h
     INT 21h
-    MOV BL, AL     ; guardar opcao em BL
-
-    ; Consumir Enter
+    MOV BL, AL
     MOV AH, 01h
-    INT 21h
+    INT 21h        ; consumir Enter
 
     CMP BL, '0'
     JE SAIR
@@ -233,6 +263,145 @@ SAIR:
 MAIN ENDP
 
 ; ============================================================
+; CARREGAR_DADOS
+;   Tenta abrir VEICULOS.DAT e ler os dados.
+;   Se falhar, chama INIT_DADOS (exemplos hardcoded).
+; ============================================================
+CARREGAR_DADOS PROC
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    ; Abrir ficheiro para leitura (modo 0 = read)
+    MOV AX, 3D00h
+    LEA DX, fname
+    INT 21h
+    JC DAT_NAO_EXISTE    ; carry set = ficheiro nao existe
+
+    MOV fhandle, AX      ; guardar handle
+
+    ; --- Ler cabecalho: 2 bytes (num_carros, num_motas) ---
+    MOV BX, fhandle
+    LEA DX, num_carros
+    MOV CX, 2
+    MOV AH, 3Fh
+    INT 21h
+    JC FECHAR_E_EXEMPLO
+
+    ; --- Ler array de carros ---
+    LEA DX, arr_carros
+    MOV CX, DADOS_CARR
+    MOV AH, 3Fh
+    INT 21h
+    JC FECHAR_E_EXEMPLO
+
+    ; --- Ler array de motas ---
+    LEA DX, arr_motas
+    MOV CX, DADOS_MOTA
+    MOV AH, 3Fh
+    INT 21h
+    JC FECHAR_E_EXEMPLO
+
+    ; Fechar ficheiro
+    MOV AH, 3Eh
+    MOV BX, fhandle
+    INT 21h
+
+    LEA DX, msg_dat_load
+    MOV AH, 09h
+    INT 21h
+    JMP FIM_CARR
+
+FECHAR_E_EXEMPLO:
+    MOV AH, 3Eh
+    MOV BX, fhandle
+    INT 21h
+
+DAT_NAO_EXISTE:
+    LEA DX, msg_dat_novo
+    MOV AH, 09h
+    INT 21h
+    CALL INIT_DADOS
+
+FIM_CARR:
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+CARREGAR_DADOS ENDP
+
+; ============================================================
+; GRAVAR_DADOS
+;   Cria/substitui VEICULOS.DAT com o estado actual.
+; ============================================================
+GRAVAR_DADOS PROC
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    ; Criar ficheiro (cria ou trunca)
+    MOV AX, 3C00h        ; criar ficheiro
+    MOV CX, 0            ; atributo normal
+    LEA DX, fname
+    INT 21h
+    JC GRAVAR_ERRO
+
+    MOV fhandle, AX
+
+    ; --- Escrever cabecalho: 2 bytes ---
+    MOV BX, fhandle
+    LEA DX, num_carros
+    MOV CX, 2
+    MOV AH, 40h
+    INT 21h
+    JC GRAVAR_FECHAR_ERR
+
+    ; --- Escrever array de carros ---
+    LEA DX, arr_carros
+    MOV CX, DADOS_CARR
+    MOV AH, 40h
+    INT 21h
+    JC GRAVAR_FECHAR_ERR
+
+    ; --- Escrever array de motas ---
+    LEA DX, arr_motas
+    MOV CX, DADOS_MOTA
+    MOV AH, 40h
+    INT 21h
+    JC GRAVAR_FECHAR_ERR
+
+    ; Fechar
+    MOV AH, 3Eh
+    MOV BX, fhandle
+    INT 21h
+
+    LEA DX, msg_dat_ok
+    MOV AH, 09h
+    INT 21h
+    JMP FIM_GRAVAR
+
+GRAVAR_FECHAR_ERR:
+    MOV AH, 3Eh
+    MOV BX, fhandle
+    INT 21h
+
+GRAVAR_ERRO:
+    LEA DX, msg_dat_err
+    MOV AH, 09h
+    INT 21h
+
+FIM_GRAVAR:
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+GRAVAR_DADOS ENDP
+
+; ============================================================
 ; INIT_DADOS - copia veiculos de exemplo para os arrays
 ; ============================================================
 INIT_DADOS PROC
@@ -242,7 +411,7 @@ INIT_DADOS PROC
     PUSH DI
 
     ; --- Carro 1 ---
-    MOV DI, OFFSET arr_carros   ; posicao 0
+    MOV DI, OFFSET arr_carros
     MOV SI, OFFSET c1_marca
     MOV CX, CAMPO_TAM
     REP MOVSB
@@ -261,9 +430,11 @@ INIT_DADOS PROC
     MOV SI, OFFSET c1_preco
     MOV CX, PRECO_TAM
     REP MOVSB
+    MOV SI, OFFSET c1_cil
+    MOV CX, CIL_TAM
+    REP MOVSB
 
     ; --- Carro 2 ---
-    ; DI ja esta em arr_carros + VEICULO_TAM
     MOV SI, OFFSET c2_marca
     MOV CX, CAMPO_TAM
     REP MOVSB
@@ -281,6 +452,9 @@ INIT_DADOS PROC
     REP MOVSB
     MOV SI, OFFSET c2_preco
     MOV CX, PRECO_TAM
+    REP MOVSB
+    MOV SI, OFFSET c2_cil
+    MOV CX, CIL_TAM
     REP MOVSB
 
     MOV BYTE PTR num_carros, 2
@@ -305,6 +479,9 @@ INIT_DADOS PROC
     MOV SI, OFFSET m1_preco
     MOV CX, PRECO_TAM
     REP MOVSB
+    MOV SI, OFFSET m1_cil
+    MOV CX, CIL_TAM
+    REP MOVSB
 
     ; --- Mota 2 ---
     MOV SI, OFFSET m2_marca
@@ -325,6 +502,9 @@ INIT_DADOS PROC
     MOV SI, OFFSET m2_preco
     MOV CX, PRECO_TAM
     REP MOVSB
+    MOV SI, OFFSET m2_cil
+    MOV CX, CIL_TAM
+    REP MOVSB
 
     MOV BYTE PTR num_motas, 2
 
@@ -337,7 +517,6 @@ INIT_DADOS ENDP
 
 ; ============================================================
 ; LOGIN_ADMIN
-;   Pede password, compara com "admin123"
 ;   Retorna AL=1 se correcta, AL=0 se errada
 ; ============================================================
 LOGIN_ADMIN PROC
@@ -350,32 +529,24 @@ LOGIN_ADMIN PROC
     MOV AH, 09h
     INT 21h
 
-    ; Ler password caracter a caracter (sem echo para simular seguranca)
     LEA DI, pass_buf
-    MOV CX, 0          ; contador de chars
+    MOV CX, 0
 
 LER_PASS:
-    MOV AH, 08h        ; read char sem echo
+    MOV AH, 08h
     INT 21h
-
-    CMP AL, 13         ; Enter pressionado?
+    CMP AL, 13
     JE FIM_LER
-
-    CMP AL, 8          ; Backspace?
+    CMP AL, 8
     JE BACKSPACE_P
-
-    CMP CX, PASS_LEN   ; limite atingido?
+    CMP CX, PASS_LEN
     JGE LER_PASS
-
     MOV [DI], AL
     INC DI
     INC CX
-
-    ; Mostrar '*' em vez do caracter real
     MOV AH, 02h
     MOV DL, '*'
     INT 21h
-
     JMP LER_PASS
 
 BACKSPACE_P:
@@ -384,7 +555,6 @@ BACKSPACE_P:
     DEC DI
     DEC CX
     MOV BYTE PTR [DI], 0
-    ; Apagar o '*' do ecra
     MOV AH, 02h
     MOV DL, 8
     INT 21h
@@ -395,13 +565,10 @@ BACKSPACE_P:
     JMP LER_PASS
 
 FIM_LER:
-    MOV BYTE PTR [DI], 0   ; terminar string
-
-    ; Verificar comprimento: tem de ser igual a PASS_LEN
+    MOV BYTE PTR [DI], 0
     CMP CX, PASS_LEN
     JNE PASS_ERRADA
 
-    ; Comparar pass_buf com password
     LEA SI, pass_buf
     LEA DI, password
     MOV CX, PASS_LEN
@@ -414,7 +581,6 @@ COMP_PASS:
     INC DI
     LOOP COMP_PASS
 
-    ; Password correcta
     LEA DX, msg_acesso
     MOV AH, 09h
     INT 21h
@@ -452,7 +618,7 @@ LOOP_USER:
     INT 21h
     MOV BL, AL
     MOV AH, 01h
-    INT 21h    ; consumir Enter
+    INT 21h
 
     CMP BL, '0'
     JE FIM_USER
@@ -466,12 +632,12 @@ LOOP_USER:
     JMP LOOP_USER
 
 VER_CARROS_U:
-    MOV AL, 0    ; flag: 0=carros
+    MOV AL, 0
     CALL LISTAR_VEICULOS
     JMP LOOP_USER
 
 VER_MOTAS_U:
-    MOV AL, 1    ; flag: 1=motas
+    MOV AL, 1
     CALL LISTAR_VEICULOS
     JMP LOOP_USER
 
@@ -499,7 +665,7 @@ LOOP_ADM:
     INT 21h
     MOV BL, AL
     MOV AH, 01h
-    INT 21h    ; consumir Enter
+    INT 21h
 
     CMP BL, '0'
     JE FIM_ADM
@@ -534,16 +700,18 @@ ADD_C_A:
     MOV BL, num_carros
     CMP BL, MAX_VEI
     JGE CHEIO_ADM
-    MOV AL, 0      ; carros
+    MOV AL, 0
     CALL ADICIONAR_VEICULO
+    CALL GRAVAR_DADOS      ; gravar apos adicionar
     JMP LOOP_ADM
 
 ADD_M_A:
     MOV BL, num_motas
     CMP BL, MAX_VEI
     JGE CHEIO_ADM
-    MOV AL, 1      ; motas
+    MOV AL, 1
     CALL ADICIONAR_VEICULO
+    CALL GRAVAR_DADOS      ; gravar apos adicionar
     JMP LOOP_ADM
 
 EDIT_C_A:
@@ -558,6 +726,7 @@ EDIT_C_A:
     MOV idx_tmp, AL
     MOV AL, 0
     CALL EDITAR_VEICULO
+    CALL GRAVAR_DADOS      ; gravar apos editar
     JMP LOOP_ADM
 
 EDIT_M_A:
@@ -572,6 +741,7 @@ EDIT_M_A:
     MOV idx_tmp, AL
     MOV AL, 1
     CALL EDITAR_VEICULO
+    CALL GRAVAR_DADOS      ; gravar apos editar
     JMP LOOP_ADM
 
 CHEIO_ADM:
@@ -600,8 +770,7 @@ FIM_ADM:
 MENU_ADMIN ENDP
 
 ; ============================================================
-; LISTAR_VEICULOS
-;   AL = 0 -> carros   AL = 1 -> motas
+; LISTAR_VEICULOS  (AL=0 carros, AL=1 motas)
 ; ============================================================
 LISTAR_VEICULOS PROC
     PUSH AX
@@ -611,34 +780,33 @@ LISTAR_VEICULOS PROC
     PUSH SI
 
     CMP AL, 0
-    JE LISTAR_CARROS_L
+    JE LIST_CARROS
 
-    ; Motas
     LEA DX, hdr_motas
     MOV AH, 09h
     INT 21h
     MOV BL, num_motas
     MOV SI, OFFSET arr_motas
-    JMP LISTAR_LOOP
+    JMP LIST_LOOP
 
-LISTAR_CARROS_L:
+LIST_CARROS:
     LEA DX, hdr_carros
     MOV AH, 09h
     INT 21h
     MOV BL, num_carros
     MOV SI, OFFSET arr_carros
 
-LISTAR_LOOP:
+LIST_LOOP:
     CMP BL, 0
-    JE LISTAR_VAZIO
+    JE LIST_VAZIO
 
-    MOV CL, 0      ; indice actual (0-based)
+    MOV CL, 0
 
-CADA_VEICULO:
+CADA_VEI:
     CMP CL, BL
-    JGE FIM_LISTAR
+    JGE FIM_LIST
 
-    ; Imprimir "  --- Veiculo #N ---"
+    ; "  --- Veiculo #N ---"
     LEA DX, lbl_vnum
     MOV AH, 09h
     INT 21h
@@ -650,16 +818,16 @@ CADA_VEICULO:
     MOV AH, 09h
     INT 21h
 
-    ; Imprimir Marca
+    ; Marca
     LEA DX, lbl_marca
     MOV AH, 09h
     INT 21h
-    CALL PRINT_CAMPO   ; SI avanca CAMPO_TAM
+    CALL PRINT_CAMPO
     LEA DX, msg_nl
     MOV AH, 09h
     INT 21h
 
-    ; Imprimir Modelo
+    ; Modelo
     LEA DX, lbl_modelo
     MOV AH, 09h
     INT 21h
@@ -668,7 +836,7 @@ CADA_VEICULO:
     MOV AH, 09h
     INT 21h
 
-    ; Imprimir KMs
+    ; KMs
     LEA DX, lbl_kms
     MOV AH, 09h
     INT 21h
@@ -677,7 +845,7 @@ CADA_VEICULO:
     MOV AH, 09h
     INT 21h
 
-    ; Imprimir Ano
+    ; Ano
     LEA DX, lbl_ano
     MOV AH, 09h
     INT 21h
@@ -686,7 +854,7 @@ CADA_VEICULO:
     MOV AH, 09h
     INT 21h
 
-    ; Imprimir Cor
+    ; Cor
     LEA DX, lbl_cor
     MOV AH, 09h
     INT 21h
@@ -695,7 +863,7 @@ CADA_VEICULO:
     MOV AH, 09h
     INT 21h
 
-    ; Imprimir Preco
+    ; Preco
     LEA DX, lbl_preco
     MOV AH, 09h
     INT 21h
@@ -704,15 +872,24 @@ CADA_VEICULO:
     MOV AH, 09h
     INT 21h
 
-    INC CL
-    JMP CADA_VEICULO
+    ; Cilindrada  (novo campo!)
+    LEA DX, lbl_cil
+    MOV AH, 09h
+    INT 21h
+    CALL PRINT_CAMPO_CIL
+    LEA DX, lbl_cc
+    MOV AH, 09h
+    INT 21h
 
-LISTAR_VAZIO:
+    INC CL
+    JMP CADA_VEI
+
+LIST_VAZIO:
     LEA DX, msg_vazio
     MOV AH, 09h
     INT 21h
 
-FIM_LISTAR:
+FIM_LIST:
     POP SI
     POP DX
     POP CX
@@ -722,143 +899,217 @@ FIM_LISTAR:
 LISTAR_VEICULOS ENDP
 
 ; ============================================================
-; PRINT_CAMPO
-;   Imprime string null-terminated a partir de SI (max CAMPO_TAM)
-;   SI avanca CAMPO_TAM bytes
+; PRINT_CAMPO       - imprime CAMPO_TAM, avanca SI
+; PRINT_CAMPO_PRECO - imprime PRECO_TAM, avanca SI
+; PRINT_CAMPO_CIL   - imprime CIL_TAM,   avanca SI
 ; ============================================================
 PRINT_CAMPO PROC
     PUSH AX
-    PUSH BX
     PUSH CX
     PUSH DX
-
     MOV CX, CAMPO_TAM
-
-PRINT_CHAR_C:
+PPC_L:
     CMP CX, 0
-    JE FIM_PRINT_C
+    JE PPC_F
     MOV AL, [SI]
     TEST AL, AL
-    JZ FIM_PRINT_C
+    JZ PPC_F
     MOV AH, 02h
     MOV DL, AL
     INT 21h
     INC SI
     DEC CX
-    JMP PRINT_CHAR_C
-
-FIM_PRINT_C:
-    ; Avancar SI para o proximo campo (zerar o resto)
-    ; CX contem os bytes restantes
-    ; SI = SI + CX
-    ADD SI, CX     ; saltar para o fim do campo
-
+    JMP PPC_L
+PPC_F:
+    ADD SI, CX
     POP DX
     POP CX
-    POP BX
     POP AX
     RET
 PRINT_CAMPO ENDP
 
-; ============================================================
-; PRINT_CAMPO_PRECO  (igual mas PRECO_TAM)
-; ============================================================
 PRINT_CAMPO_PRECO PROC
     PUSH AX
-    PUSH BX
     PUSH CX
     PUSH DX
-
     MOV CX, PRECO_TAM
-
-PRINT_CHAR_P:
+PPP_L:
     CMP CX, 0
-    JE FIM_PRINT_P
+    JE PPP_F
     MOV AL, [SI]
     TEST AL, AL
-    JZ FIM_PRINT_P
+    JZ PPP_F
     MOV AH, 02h
     MOV DL, AL
     INT 21h
     INC SI
     DEC CX
-    JMP PRINT_CHAR_P
-
-FIM_PRINT_P:
+    JMP PPP_L
+PPP_F:
     ADD SI, CX
-
     POP DX
     POP CX
-    POP BX
     POP AX
     RET
 PRINT_CAMPO_PRECO ENDP
 
+PRINT_CAMPO_CIL PROC
+    PUSH AX
+    PUSH CX
+    PUSH DX
+    MOV CX, CIL_TAM
+PPCIL_L:
+    CMP CX, 0
+    JE PPCIL_F
+    MOV AL, [SI]
+    TEST AL, AL
+    JZ PPCIL_F
+    MOV AH, 02h
+    MOV DL, AL
+    INT 21h
+    INC SI
+    DEC CX
+    JMP PPCIL_L
+PPCIL_F:
+    ADD SI, CX
+    POP DX
+    POP CX
+    POP AX
+    RET
+PRINT_CAMPO_CIL ENDP
+
+; ============================================================
+; Versoes *_SI_ONLY: imprimem sem avancar SI (para "valor actual")
+; ============================================================
+PRINT_CAMPO_SI_ONLY PROC
+    PUSH AX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+    MOV CX, CAMPO_TAM
+PCSO_L:
+    CMP CX, 0
+    JE PCSO_F
+    MOV AL, [SI]
+    TEST AL, AL
+    JZ PCSO_F
+    MOV AH, 02h
+    MOV DL, AL
+    INT 21h
+    INC SI
+    DEC CX
+    JMP PCSO_L
+PCSO_F:
+    POP SI
+    POP DX
+    POP CX
+    POP AX
+    RET
+PRINT_CAMPO_SI_ONLY ENDP
+
+PRINT_PRECO_SI_ONLY PROC
+    PUSH AX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+    MOV CX, PRECO_TAM
+PPSO_L:
+    CMP CX, 0
+    JE PPSO_F
+    MOV AL, [SI]
+    TEST AL, AL
+    JZ PPSO_F
+    MOV AH, 02h
+    MOV DL, AL
+    INT 21h
+    INC SI
+    DEC CX
+    JMP PPSO_L
+PPSO_F:
+    POP SI
+    POP DX
+    POP CX
+    POP AX
+    RET
+PRINT_PRECO_SI_ONLY ENDP
+
+PRINT_CIL_SI_ONLY PROC
+    PUSH AX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+    MOV CX, CIL_TAM
+PCILSO_L:
+    CMP CX, 0
+    JE PCILSO_F
+    MOV AL, [SI]
+    TEST AL, AL
+    JZ PCILSO_F
+    MOV AH, 02h
+    MOV DL, AL
+    INT 21h
+    INC SI
+    DEC CX
+    JMP PCILSO_L
+PCILSO_F:
+    POP SI
+    POP DX
+    POP CX
+    POP AX
+    RET
+PRINT_CIL_SI_ONLY ENDP
+
 ; ============================================================
 ; LER_CAMPO
-;   Le input para [DI], max BX bytes
-;   Substitui Enter por 0, zera o resto
+;   BX = tamanho maximo,  DI = destino (avanca BX no fim)
 ; ============================================================
 LER_CAMPO PROC
-    ; BX = tamanho maximo do campo
-    ; DI = ponteiro destino (avanca BX bytes no fim)
     PUSH AX
     PUSH CX
     PUSH SI
 
-    ; SI = ponteiro de escrita (anda junto com DI durante a leitura)
-    ; Usamos SI como cursor de escrita para evitar [DI+CX]
-    MOV SI, DI     ; SI aponta para inicio do campo
-    MOV CX, 0      ; numero de chars lidos ate agora
+    MOV SI, DI
+    MOV CX, 0
 
-LER_LOOP:
+LC_LOOP:
     CMP CX, BX
-    JGE LER_STRIP
-
+    JGE LC_STRIP
     MOV AH, 01h
-    INT 21h        ; ler char com echo
-
-    CMP AL, 13     ; Enter?
-    JE LER_STRIP
-    CMP AL, 8      ; Backspace?
-    JE LER_BACK
-
-    ; Guardar char em [SI] e avancar SI
+    INT 21h
+    CMP AL, 13
+    JE LC_STRIP
+    CMP AL, 8
+    JE LC_BACK
     MOV [SI], AL
     INC SI
     INC CX
-    JMP LER_LOOP
+    JMP LC_LOOP
 
-LER_BACK:
+LC_BACK:
     CMP CX, 0
-    JE LER_LOOP
+    JE LC_LOOP
     DEC SI
     DEC CX
-    MOV BYTE PTR [SI], 0   ; apagar o char guardado
-    ; Apagar visualmente: backspace, espaco, backspace
+    MOV BYTE PTR [SI], 0
     MOV AH, 02h
     MOV DL, ' '
     INT 21h
     MOV DL, 8
     INT 21h
-    JMP LER_LOOP
+    JMP LC_LOOP
 
-LER_STRIP:
-    ; Zerar do cursor SI ate DI+BX (fim do campo)
-    ; SI ja esta na posicao certa apos a leitura
-LER_ZERO:
+LC_STRIP:
+LC_ZERO:
     MOV AX, DI
-    ADD AX, BX     ; AX = endereco do fim do campo
+    ADD AX, BX
     CMP SI, AX
-    JGE FIM_LER_CAMPO
+    JGE LC_FIM
     MOV BYTE PTR [SI], 0
     INC SI
-    JMP LER_ZERO
+    JMP LC_ZERO
 
-FIM_LER_CAMPO:
-    ; Avancar DI para o proximo campo
+LC_FIM:
     ADD DI, BX
-
     POP SI
     POP CX
     POP AX
@@ -866,8 +1117,7 @@ FIM_LER_CAMPO:
 LER_CAMPO ENDP
 
 ; ============================================================
-; PEDIR_CAMPOS_VEICULO
-;   DI = ptr destino, le todos os 6 campos
+; PEDIR_CAMPOS  (DI = inicio do veiculo; le os 7 campos)
 ; ============================================================
 PEDIR_CAMPOS PROC
     PUSH DX
@@ -909,14 +1159,19 @@ PEDIR_CAMPOS PROC
     MOV BX, PRECO_TAM
     CALL LER_CAMPO
 
+    LEA DX, prm_cil
+    MOV AH, 09h
+    INT 21h
+    MOV BX, CIL_TAM
+    CALL LER_CAMPO
+
     POP BX
     POP DX
     RET
 PEDIR_CAMPOS ENDP
 
 ; ============================================================
-; ADICIONAR_VEICULO
-;   AL = 0 carros, AL = 1 motas
+; ADICIONAR_VEICULO  (AL=0 carros, AL=1 motas)
 ; ============================================================
 ADICIONAR_VEICULO PROC
     PUSH AX
@@ -925,9 +1180,8 @@ ADICIONAR_VEICULO PROC
     PUSH DX
 
     CMP AL, 0
-    JE CALC_CARRO_ADD
+    JE CALC_ADD_CARR
 
-    ; Motas
     MOV BL, num_motas
     MOV BH, 0
     MOV AX, VEICULO_TAM
@@ -938,7 +1192,7 @@ ADICIONAR_VEICULO PROC
     INC num_motas
     JMP ADD_OK
 
-CALC_CARRO_ADD:
+CALC_ADD_CARR:
     MOV BL, num_carros
     MOV BH, 0
     MOV AX, VEICULO_TAM
@@ -961,9 +1215,7 @@ ADD_OK:
 ADICIONAR_VEICULO ENDP
 
 ; ============================================================
-; PEDIR_IDX
-;   Le numero de 1-5, retorna 0-based em AL
-;   Se invalido retorna AL=0FFh
+; PEDIR_IDX  - le '1'-'5', retorna 0-based em AL
 ; ============================================================
 PEDIR_IDX PROC
     PUSH BX
@@ -976,17 +1228,15 @@ PEDIR_IDX PROC
     MOV AH, 01h
     INT 21h
     MOV BL, AL
-
-    ; Consumir Enter
     MOV AH, 01h
-    INT 21h
+    INT 21h        ; consumir Enter
 
     CMP BL, '1'
     JB IDX_INV
     CMP BL, '5'
     JA IDX_INV
 
-    SUB BL, '1'    ; 0-based
+    SUB BL, '1'
     MOV AL, BL
     JMP FIM_IDX
 
@@ -1000,16 +1250,7 @@ FIM_IDX:
 PEDIR_IDX ENDP
 
 ; ============================================================
-; EDITAR_VEICULO
-;   AL = 0 carros, AL = 1 motas
-;   idx_tmp = indice 0-based (ja validado pelo caller)
-;
-;   Fluxo:
-;     1. Calcula DI = base do veiculo seleccionado
-;     2. Guarda DI em vei_base
-;     3. Loop: mostra submenu, o utilizador escolhe o campo
-;        a editar, pede o novo valor so para esse campo
-;     4. [0] sai do loop
+; EDITAR_VEICULO  (AL=0 carros, AL=1 motas, idx_tmp=indice)
 ; ============================================================
 EDITAR_VEICULO PROC
     PUSH AX
@@ -1017,68 +1258,64 @@ EDITAR_VEICULO PROC
     PUSH DI
     PUSH DX
 
-    ; --- Calcular DI = endereco do veiculo a editar ---
     MOV BL, idx_tmp
     MOV BH, 0
 
     CMP AL, 0
-    JE CALC_BASE_CARRO
+    JE CALC_EDIT_CARR
 
-    ; Motas
     MOV AX, VEICULO_TAM
     MUL BX
     MOV DI, OFFSET arr_motas
     ADD DI, AX
     JMP EDIT_LOOP
 
-CALC_BASE_CARRO:
+CALC_EDIT_CARR:
     MOV AX, VEICULO_TAM
     MUL BX
     MOV DI, OFFSET arr_carros
     ADD DI, AX
 
-    ; --- DI aponta para o inicio do veiculo ---
-    ; Guardar base em vei_base para poder voltar a ela
 EDIT_LOOP:
     MOV vei_base, DI
 
-    ; Mostrar submenu de edicao
     LEA DX, msg_menu_edit
     MOV AH, 09h
     INT 21h
 
-    ; Ler opcao
     MOV AH, 01h
     INT 21h
     MOV BL, AL
-    MOV AH, 01h   ; consumir Enter
+    MOV AH, 01h
     INT 21h
 
     CMP BL, '0'
     JE EDIT_FIM
     CMP BL, '1'
-    JE EDIT_MARCA
+    JE ED_MARCA
     CMP BL, '2'
-    JE EDIT_MODELO
+    JE ED_MODELO
     CMP BL, '3'
-    JE EDIT_KMS
+    JE ED_KMS
     CMP BL, '4'
-    JE EDIT_ANO
+    JE ED_ANO
     CMP BL, '5'
-    JE EDIT_COR
+    JE ED_COR
     CMP BL, '6'
-    JE EDIT_PRECO
-    ; opcao invalida - repetir
+    JE ED_PRECO
+    CMP BL, '7'
+    JE ED_CIL
     LEA DX, msg_inv_op
     MOV AH, 09h
     INT 21h
     MOV DI, vei_base
     JMP EDIT_LOOP
 
-EDIT_MARCA:
-    ; Mostrar valor actual da Marca (offset 0)
-    MOV DI, vei_base
-    MOV SI, DI
+; ---- Macro-like inline para cada campo ----
+; Padrao: mostrar valor actual, pedir novo, chamar LER_CAMPO
+
+ED_MARCA:
+    MOV SI, vei_base            ; offset 0
     LEA DX, msg_edit_atual
     MOV AH, 09h
     INT 21h
@@ -1086,19 +1323,17 @@ EDIT_MARCA:
     LEA DX, msg_nl
     MOV AH, 09h
     INT 21h
-    ; Pedir novo valor
     LEA DX, prm_marca
     MOV AH, 09h
     INT 21h
     MOV DI, vei_base
     MOV BX, CAMPO_TAM
     CALL LER_CAMPO
-    JMP EDIT_OK_CAMPO
+    JMP ED_OK
 
-EDIT_MODELO:
-    MOV DI, vei_base
-    MOV SI, DI
-    ADD SI, CAMPO_TAM      ; offset 1*CAMPO_TAM = Modelo
+ED_MODELO:
+    MOV SI, vei_base
+    ADD SI, OFF_MODELO
     LEA DX, msg_edit_atual
     MOV AH, 09h
     INT 21h
@@ -1110,16 +1345,14 @@ EDIT_MODELO:
     MOV AH, 09h
     INT 21h
     MOV DI, vei_base
-    ADD DI, CAMPO_TAM      ; DI aponta para Modelo
+    ADD DI, OFF_MODELO
     MOV BX, CAMPO_TAM
     CALL LER_CAMPO
-    JMP EDIT_OK_CAMPO
+    JMP ED_OK
 
-EDIT_KMS:
-    MOV DI, vei_base
-    MOV SI, DI
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM      ; offset 2*CAMPO_TAM = KMs
+ED_KMS:
+    MOV SI, vei_base
+    ADD SI, OFF_KMS
     LEA DX, msg_edit_atual
     MOV AH, 09h
     INT 21h
@@ -1131,18 +1364,14 @@ EDIT_KMS:
     MOV AH, 09h
     INT 21h
     MOV DI, vei_base
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM      ; DI aponta para KMs
+    ADD DI, OFF_KMS
     MOV BX, CAMPO_TAM
     CALL LER_CAMPO
-    JMP EDIT_OK_CAMPO
+    JMP ED_OK
 
-EDIT_ANO:
-    MOV DI, vei_base
-    MOV SI, DI
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM      ; offset 3*CAMPO_TAM = Ano
+ED_ANO:
+    MOV SI, vei_base
+    ADD SI, OFF_ANO
     LEA DX, msg_edit_atual
     MOV AH, 09h
     INT 21h
@@ -1154,20 +1383,14 @@ EDIT_ANO:
     MOV AH, 09h
     INT 21h
     MOV DI, vei_base
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM      ; DI aponta para Ano
+    ADD DI, OFF_ANO
     MOV BX, CAMPO_TAM
     CALL LER_CAMPO
-    JMP EDIT_OK_CAMPO
+    JMP ED_OK
 
-EDIT_COR:
-    MOV DI, vei_base
-    MOV SI, DI
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM      ; offset 4*CAMPO_TAM = Cor
+ED_COR:
+    MOV SI, vei_base
+    ADD SI, OFF_COR
     LEA DX, msg_edit_atual
     MOV AH, 09h
     INT 21h
@@ -1179,26 +1402,18 @@ EDIT_COR:
     MOV AH, 09h
     INT 21h
     MOV DI, vei_base
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM      ; DI aponta para Cor
+    ADD DI, OFF_COR
     MOV BX, CAMPO_TAM
     CALL LER_CAMPO
-    JMP EDIT_OK_CAMPO
+    JMP ED_OK
 
-EDIT_PRECO:
-    MOV DI, vei_base
-    MOV SI, DI
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM
-    ADD SI, CAMPO_TAM      ; offset 5*CAMPO_TAM = Preco
+ED_PRECO:
+    MOV SI, vei_base
+    ADD SI, OFF_PRECO
     LEA DX, msg_edit_atual
     MOV AH, 09h
     INT 21h
-    CALL PRINT_CAMPO_PRECO_SI_ONLY
+    CALL PRINT_PRECO_SI_ONLY
     LEA DX, msg_nl
     MOV AH, 09h
     INT 21h
@@ -1206,20 +1421,34 @@ EDIT_PRECO:
     MOV AH, 09h
     INT 21h
     MOV DI, vei_base
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM
-    ADD DI, CAMPO_TAM      ; DI aponta para Preco
+    ADD DI, OFF_PRECO
     MOV BX, PRECO_TAM
     CALL LER_CAMPO
-    JMP EDIT_OK_CAMPO
+    JMP ED_OK
 
-EDIT_OK_CAMPO:
+ED_CIL:
+    MOV SI, vei_base
+    ADD SI, OFF_CIL
+    LEA DX, msg_edit_atual
+    MOV AH, 09h
+    INT 21h
+    CALL PRINT_CIL_SI_ONLY
+    LEA DX, msg_nl
+    MOV AH, 09h
+    INT 21h
+    LEA DX, prm_cil
+    MOV AH, 09h
+    INT 21h
+    MOV DI, vei_base
+    ADD DI, OFF_CIL
+    MOV BX, CIL_TAM
+    CALL LER_CAMPO
+    JMP ED_OK
+
+ED_OK:
     LEA DX, msg_ok_ed
     MOV AH, 09h
     INT 21h
-    ; Voltar ao submenu para editar mais campos
     MOV DI, vei_base
     JMP EDIT_LOOP
 
@@ -1230,72 +1459,5 @@ EDIT_FIM:
     POP AX
     RET
 EDITAR_VEICULO ENDP
-
-; ============================================================
-; PRINT_CAMPO_SI_ONLY
-;   Imprime campo a partir de SI (max CAMPO_TAM)
-;   NAO avanca SI (apenas para mostrar valor actual)
-; ============================================================
-PRINT_CAMPO_SI_ONLY PROC
-    PUSH AX
-    PUSH CX
-    PUSH DX
-    PUSH SI
-
-    MOV CX, CAMPO_TAM
-
-PCSO_LOOP:
-    CMP CX, 0
-    JE PCSO_FIM
-    MOV AL, [SI]
-    TEST AL, AL
-    JZ PCSO_FIM
-    MOV AH, 02h
-    MOV DL, AL
-    INT 21h
-    INC SI
-    DEC CX
-    JMP PCSO_LOOP
-
-PCSO_FIM:
-    POP SI
-    POP DX
-    POP CX
-    POP AX
-    RET
-PRINT_CAMPO_SI_ONLY ENDP
-
-; ============================================================
-; PRINT_CAMPO_PRECO_SI_ONLY
-;   Igual mas PRECO_TAM, NAO avanca SI
-; ============================================================
-PRINT_CAMPO_PRECO_SI_ONLY PROC
-    PUSH AX
-    PUSH CX
-    PUSH DX
-    PUSH SI
-
-    MOV CX, PRECO_TAM
-
-PCSOP_LOOP:
-    CMP CX, 0
-    JE PCSOP_FIM
-    MOV AL, [SI]
-    TEST AL, AL
-    JZ PCSOP_FIM
-    MOV AH, 02h
-    MOV DL, AL
-    INT 21h
-    INC SI
-    DEC CX
-    JMP PCSOP_LOOP
-
-PCSOP_FIM:
-    POP SI
-    POP DX
-    POP CX
-    POP AX
-    RET
-PRINT_CAMPO_PRECO_SI_ONLY ENDP
 
 END MAIN
